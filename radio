@@ -30,22 +30,44 @@ radio_menu["Trance"]="trance.ogg.m3u"
 radio_menu["Tronic"]="tronic.ogg.m3u"
 radio_menu["Dubstep"]="dubstepfm.ogg.m3u"
 
-# Menu options array for navigation
-menu_options=("Trance" "Ambient" "Tronic" "Dubstep" "Quit")
-current_selection=0
+# Main menu options
+main_menu_options=("Stations" "Quit")
+main_current_selection=0
+
+# Stations submenu options
+stations_menu_options=("Trance" "Ambient" "Tronic" "Dubstep" "Back")
+stations_current_selection=0
 stations_dir="stations"
 
-# Function to display the radio menu
-display_menu() {
+# Function to display the main menu
+display_main_menu() {
   clear
   echo -e "$BANNER"
   echo -e "  ${RED}~~~~ ${NC}${YELLOW}Radio Menu${NC}${RED} ~~~~${NC}"
   
-  for i in "${!menu_options[@]}"; do
-    if [ $i -eq $current_selection ]; then
-      echo -e "  ${BOLD}${CYAN}▶ ${menu_options[$i]}${NC}"
+  for i in "${!main_menu_options[@]}"; do
+    if [ $i -eq $main_current_selection ]; then
+      echo -e "  ${BOLD}${CYAN}▶ ${main_menu_options[$i]}${NC}"
     else
-      echo -e "  ${GREEN}  ${menu_options[$i]}${NC}"
+      echo -e "  ${GREEN}  ${main_menu_options[$i]}${NC}"
+    fi
+  done
+  
+  echo -e "  ${RED}~~~~~~~~~~~~~~~~~~~~${NC}"
+  echo -e "  ${YELLOW}Use ↑↓ arrows to navigate, Enter to select${NC}"
+}
+
+# Function to display the stations submenu
+display_stations_menu() {
+  clear
+  echo -e "$BANNER"
+  echo -e "  ${RED}~~~~ ${NC}${YELLOW}Radio Stations${NC}${RED} ~~~~${NC}"
+  
+  for i in "${!stations_menu_options[@]}"; do
+    if [ $i -eq $stations_current_selection ]; then
+      echo -e "  ${BOLD}${CYAN}▶ ${stations_menu_options[$i]}${NC}"
+    else
+      echo -e "  ${GREEN}  ${stations_menu_options[$i]}${NC}"
     fi
   done
   
@@ -78,32 +100,31 @@ read_key() {
   esac
 }
 
-# Function to handle menu navigation
-navigate_menu() {
+# Function to handle stations submenu navigation
+navigate_stations_menu() {
   while true; do
-    display_menu
+    display_stations_menu
     key=$(read_key)
     
     case $key in
       "UP")
-        if [ $current_selection -gt 0 ]; then
-          ((current_selection--))
+        if [ $stations_current_selection -gt 0 ]; then
+          ((stations_current_selection--))
         else
-          current_selection=$((${#menu_options[@]} - 1))
+          stations_current_selection=$((${#stations_menu_options[@]} - 1))
         fi
         ;;
       "DOWN")
-        if [ $current_selection -lt $((${#menu_options[@]} - 1)) ]; then
-          ((current_selection++))
+        if [ $stations_current_selection -lt $((${#stations_menu_options[@]} - 1)) ]; then
+          ((stations_current_selection++))
         else
-          current_selection=0
+          stations_current_selection=0
         fi
         ;;
       "ENTER")
-        selected_option="${menu_options[$current_selection]}"
-        if [ "$selected_option" = "Quit" ]; then
-          echo "Goodbye!"
-          exit 0
+        selected_option="${stations_menu_options[$stations_current_selection]}"
+        if [ "$selected_option" = "Back" ]; then
+          return 0
         else
           play_radio_stream "$selected_option"
         fi
@@ -112,5 +133,39 @@ navigate_menu() {
   done
 }
 
+# Function to handle main menu navigation
+navigate_main_menu() {
+  while true; do
+    display_main_menu
+    key=$(read_key)
+    
+    case $key in
+      "UP")
+        if [ $main_current_selection -gt 0 ]; then
+          ((main_current_selection--))
+        else
+          main_current_selection=$((${#main_menu_options[@]} - 1))
+        fi
+        ;;
+      "DOWN")
+        if [ $main_current_selection -lt $((${#main_menu_options[@]} - 1)) ]; then
+          ((main_current_selection++))
+        else
+          main_current_selection=0
+        fi
+        ;;
+      "ENTER")
+        selected_option="${main_menu_options[$main_current_selection]}"
+        if [ "$selected_option" = "Quit" ]; then
+          echo "Goodbye!"
+          exit 0
+        elif [ "$selected_option" = "Stations" ]; then
+          navigate_stations_menu
+        fi
+        ;;
+    esac
+  done
+}
+
 # Main program
-navigate_menu
+navigate_main_menu
