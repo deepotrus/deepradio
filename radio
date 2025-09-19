@@ -5,6 +5,8 @@ RED='\033[0;31m'
 GREEN='\033[0;32m'
 YELLOW='\033[1;33m'
 BLUE='\033[0;34m'
+CYAN='\033[0;36m'
+BOLD='\033[1m'
 NC='\033[0m' # No Color
 
 
@@ -28,6 +30,9 @@ radio_menu["Trance"]="trance.ogg.m3u"
 radio_menu["Tronic"]="tronic.ogg.m3u"
 radio_menu["Dubstep"]="dubstepfm.ogg.m3u"
 
+# Menu options array for navigation
+menu_options=("Trance" "Ambient" "Tronic" "Dubstep" "Quit")
+current_selection=0
 stations_dir="stations"
 
 # Function to display the radio menu
@@ -35,12 +40,17 @@ display_menu() {
   clear
   echo -e "$BANNER"
   echo -e "  ${RED}~~~~ ${NC}${YELLOW}Radio Menu${NC}${RED} ~~~~${NC}"
-  echo -e "  ${GREEN} 1. Trance${NC}"
-  echo -e "  ${GREEN} 2. Ambient${NC}"
-  echo -e "  ${GREEN} 3. Tronic${NC}"
-  echo -e "  ${GREEN} 4. Dubstep${NC}"
-  echo -e "  ${GREEN} 5. Quit${NC}"
+  
+  for i in "${!menu_options[@]}"; do
+    if [ $i -eq $current_selection ]; then
+      echo -e "  ${BOLD}${CYAN}▶ ${menu_options[$i]}${NC}"
+    else
+      echo -e "  ${GREEN}  ${menu_options[$i]}${NC}"
+    fi
+  done
+  
   echo -e "  ${RED}~~~~~~~~~~~~~~~~~~~~${NC}"
+  echo -e "  ${YELLOW}Use ↑↓ arrows to navigate, Enter to select${NC}"
 }
 
 play_radio_stream() {
@@ -50,24 +60,57 @@ play_radio_stream() {
   mpv "${stations_dir}/${radio_menu[$1]}"
 }
 
-# Main program loop
-while true; do
-  display_menu
-  read -p "Select an option: " option
-
-  case $option in
-  1 | 2 | 3 | 4)
-    option_name=$(echo "${!radio_menu[@]}" | cut -d' ' -f$option)
-    play_radio_stream "$option_name"
-    ;;
-  5)
-    echo "Goodbye!"
-    exit 0
-    ;;
-  *)
-    echo "$BANNER"
-    echo "Invalid option. Please try again."
-    read -p "Press Enter to continue..."
-    ;;
+# Function to read a single keypress
+read_key() {
+  local key
+  IFS= read -rsn1 key
+  case $key in
+    $'\x1b')  # ESC sequence
+      IFS= read -rsn2 key
+      case $key in
+        '[A') echo "UP" ;;
+        '[B') echo "DOWN" ;;
+        *) echo "UNKNOWN" ;;
+      esac
+      ;;
+    '') echo "ENTER" ;;
+    *) echo "UNKNOWN" ;;
   esac
-done
+}
+
+# Function to handle menu navigation
+navigate_menu() {
+  while true; do
+    display_menu
+    key=$(read_key)
+    
+    case $key in
+      "UP")
+        if [ $current_selection -gt 0 ]; then
+          ((current_selection--))
+        else
+          current_selection=$((${#menu_options[@]} - 1))
+        fi
+        ;;
+      "DOWN")
+        if [ $current_selection -lt $((${#menu_options[@]} - 1)) ]; then
+          ((current_selection++))
+        else
+          current_selection=0
+        fi
+        ;;
+      "ENTER")
+        selected_option="${menu_options[$current_selection]}"
+        if [ "$selected_option" = "Quit" ]; then
+          echo "Goodbye!"
+          exit 0
+        else
+          play_radio_stream "$selected_option"
+        fi
+        ;;
+    esac
+  done
+}
+
+# Main program
+navigate_menu
