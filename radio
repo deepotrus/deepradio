@@ -31,12 +31,17 @@ radio_menu["Tronic"]="tronic.ogg.m3u"
 radio_menu["Dubstep"]="dubstepfm.ogg.m3u"
 
 # Main menu options
-main_menu_options=("Stations" "Quit")
+main_menu_options=("Play" "Settings" "Quit")
 main_current_selection=0
 
-# Stations submenu options
+# Play submenu options
 stations_menu_options=("Trance" "Ambient" "Tronic" "Dubstep" "Back")
 stations_current_selection=0
+
+# Settings submenu options
+settings_menu_options=("Install Stations" "Check Dependencies" "Check Internet Connection" "Back")
+settings_current_selection=0
+
 stations_dir="stations"
 
 # Function to display the main menu
@@ -61,7 +66,7 @@ display_main_menu() {
 display_stations_menu() {
   clear
   echo -e "$BANNER"
-  echo -e "  ${RED}~~~~ ${NC}${YELLOW}Radio Stations${NC}${RED} ~~~~${NC}"
+  echo -e "  ${RED}~~~~ ${NC}${YELLOW}Stations List${NC}${RED} ~~~~${NC}"
   
   for i in "${!stations_menu_options[@]}"; do
     if [ $i -eq $stations_current_selection ]; then
@@ -71,7 +76,25 @@ display_stations_menu() {
     fi
   done
   
-  echo -e "  ${RED}~~~~~~~~~~~~~~~~~~~~${NC}"
+  echo -e "  ${RED}~~~~~~~~~~~~~~~~~~~~~~~${NC}"
+  echo -e "  ${YELLOW}Use ↑↓ arrows to navigate, Enter to select${NC}"
+}
+
+# Function to display the settings submenu
+display_settings_menu() {
+  clear
+  echo -e "$BANNER"
+  echo -e "  ${RED}~~~~ ${NC}${YELLOW}Radio Settings${NC}${RED} ~~~~${NC}"
+  
+  for i in "${!settings_menu_options[@]}"; do
+    if [ $i -eq $settings_current_selection ]; then
+      echo -e "  ${BOLD}${CYAN}▶ ${settings_menu_options[$i]}${NC}"
+    else
+      echo -e "  ${GREEN}  ${settings_menu_options[$i]}${NC}"
+    fi
+  done
+  
+  echo -e "  ${RED}~~~~~~~~~~~~~~~~~~~~~~~~${NC}"
   echo -e "  ${YELLOW}Use ↑↓ arrows to navigate, Enter to select${NC}"
 }
 
@@ -80,6 +103,78 @@ play_radio_stream() {
   echo -e "$BANNER"
   echo "Playing $1" radio stream...
   mpv "${stations_dir}/${radio_menu[$1]}"
+}
+
+# Function to install stations
+install_stations() {
+  clear
+  echo -e "$BANNER"
+  echo -e "  ${YELLOW}Installing radio stations...${NC}"
+  echo ""
+  
+  if [ -f "./install-stations" ]; then
+    chmod +x ./install-stations
+    ./install-stations
+    echo ""
+    echo -e "  ${GREEN}Station installation completed!${NC}"
+  else
+    echo -e "  ${RED}Error: install-stations script not found!${NC}"
+  fi
+  
+  echo ""
+  read -p "Press Enter to continue..."
+}
+
+# Function to check dependencies
+check_dependencies() {
+  clear
+  echo -e "$BANNER"
+  echo -e "  ${YELLOW}Checking dependencies...${NC}"
+  echo ""
+  
+  # Check for curl
+  if command -v curl &> /dev/null; then
+    echo -e "  ${GREEN}✓ curl is installed${NC}"
+  else
+    echo -e "  ${RED}✗ curl is NOT installed${NC}"
+    echo -e "  ${YELLOW}  Install with: sudo apt install curl${NC}"
+  fi
+  
+  # Check for mpv
+  if command -v mpv &> /dev/null; then
+    echo -e "  ${GREEN}✓ mpv is installed${NC}"
+  else
+    echo -e "  ${RED}✗ mpv is NOT installed${NC}"
+    echo -e "  ${YELLOW}  Install with: sudo apt install mpv${NC}"
+  fi
+  
+  echo ""
+  read -p "Press Enter to continue..."
+}
+
+# Function to check internet connection
+check_internet_connection() {
+  clear
+  echo -e "$BANNER"
+  echo -e "  ${YELLOW}Checking internet connection...${NC}"
+  echo ""
+  echo -e "  ${CYAN}Pinging Google DNS (8.8.8.8)...${NC}"
+  echo ""
+  
+  # Ping Google DNS with 4 packets, show output
+  ping -c 4 8.8.8.8
+  
+  # Check the return code
+  if [ $? -eq 0 ]; then
+    echo ""
+    echo -e "  ${GREEN}✓ Internet Connection Stable${NC}"
+  else
+    echo ""
+    echo -e "  ${RED}✗ Internet Connection Failed${NC}"
+  fi
+  
+  echo ""
+  read -p "Press Enter to continue..."
 }
 
 # Function to read a single keypress
@@ -133,6 +228,43 @@ navigate_stations_menu() {
   done
 }
 
+# Function to handle settings submenu navigation
+navigate_settings_menu() {
+  while true; do
+    display_settings_menu
+    key=$(read_key)
+    
+    case $key in
+      "UP")
+        if [ $settings_current_selection -gt 0 ]; then
+          ((settings_current_selection--))
+        else
+          settings_current_selection=$((${#settings_menu_options[@]} - 1))
+        fi
+        ;;
+      "DOWN")
+        if [ $settings_current_selection -lt $((${#settings_menu_options[@]} - 1)) ]; then
+          ((settings_current_selection++))
+        else
+          settings_current_selection=0
+        fi
+        ;;
+      "ENTER")
+        selected_option="${settings_menu_options[$settings_current_selection]}"
+        if [ "$selected_option" = "Back" ]; then
+          return 0
+        elif [ "$selected_option" = "Install Stations" ]; then
+          install_stations
+        elif [ "$selected_option" = "Check Dependencies" ]; then
+          check_dependencies
+        elif [ "$selected_option" = "Check Internet Connection" ]; then
+          check_internet_connection
+        fi
+        ;;
+    esac
+  done
+}
+
 # Function to handle main menu navigation
 navigate_main_menu() {
   while true; do
@@ -157,10 +289,14 @@ navigate_main_menu() {
       "ENTER")
         selected_option="${main_menu_options[$main_current_selection]}"
         if [ "$selected_option" = "Quit" ]; then
-          echo "Goodbye!"
+          echo ""
+          echo -e "  ${BLUE}Goodbye!${NC}"
+          echo ""
           exit 0
-        elif [ "$selected_option" = "Stations" ]; then
+        elif [ "$selected_option" = "Play" ]; then
           navigate_stations_menu
+        elif [ "$selected_option" = "Settings" ]; then
+          navigate_settings_menu
         fi
         ;;
     esac
