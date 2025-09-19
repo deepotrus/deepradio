@@ -9,7 +9,6 @@ CYAN='\033[0;36m'
 BOLD='\033[1m'
 NC='\033[0m' # No Color
 
-
 # ASCII art banner
 BANNER="
   ${RED}····················································${NC}
@@ -49,7 +48,7 @@ display_main_menu() {
   clear
   echo -e "$BANNER"
   echo -e "  ${RED}~~~~ ${NC}${YELLOW}Radio Menu${NC}${RED} ~~~~${NC}"
-  
+
   for i in "${!main_menu_options[@]}"; do
     if [ $i -eq $main_current_selection ]; then
       echo -e "  ${BOLD}${CYAN}▶ ${main_menu_options[$i]}${NC}"
@@ -57,7 +56,7 @@ display_main_menu() {
       echo -e "  ${GREEN}  ${main_menu_options[$i]}${NC}"
     fi
   done
-  
+
   echo -e "  ${RED}~~~~~~~~~~~~~~~~~~~~${NC}"
   echo -e "  ${YELLOW}Use ↑↓ arrows to navigate, Enter to select${NC}"
 }
@@ -67,7 +66,7 @@ display_stations_menu() {
   clear
   echo -e "$BANNER"
   echo -e "  ${RED}~~~~ ${NC}${YELLOW}Stations List${NC}${RED} ~~~~${NC}"
-  
+
   for i in "${!stations_menu_options[@]}"; do
     if [ $i -eq $stations_current_selection ]; then
       echo -e "  ${BOLD}${CYAN}▶ ${stations_menu_options[$i]}${NC}"
@@ -75,7 +74,7 @@ display_stations_menu() {
       echo -e "  ${GREEN}  ${stations_menu_options[$i]}${NC}"
     fi
   done
-  
+
   echo -e "  ${RED}~~~~~~~~~~~~~~~~~~~~~~~${NC}"
   echo -e "  ${YELLOW}Use ↑↓ arrows to navigate, Enter to select${NC}"
 }
@@ -85,7 +84,7 @@ display_settings_menu() {
   clear
   echo -e "$BANNER"
   echo -e "  ${RED}~~~~ ${NC}${YELLOW}Radio Settings${NC}${RED} ~~~~${NC}"
-  
+
   for i in "${!settings_menu_options[@]}"; do
     if [ $i -eq $settings_current_selection ]; then
       echo -e "  ${BOLD}${CYAN}▶ ${settings_menu_options[$i]}${NC}"
@@ -93,7 +92,7 @@ display_settings_menu() {
       echo -e "  ${GREEN}  ${settings_menu_options[$i]}${NC}"
     fi
   done
-  
+
   echo -e "  ${RED}~~~~~~~~~~~~~~~~~~~~~~~~${NC}"
   echo -e "  ${YELLOW}Use ↑↓ arrows to navigate, Enter to select${NC}"
 }
@@ -102,6 +101,7 @@ play_radio_stream() {
   clear
   echo -e "$BANNER"
   echo "Playing $1" radio stream...
+  echo -e "${BLUE}Pro Tip: Press q to go back to stations list${NC}"
   mpv "${stations_dir}/${radio_menu[$1]}"
 }
 
@@ -111,7 +111,7 @@ install_stations() {
   echo -e "$BANNER"
   echo -e "  ${YELLOW}Installing radio stations...${NC}"
   echo ""
-  
+
   if [ -f "./install-stations" ]; then
     chmod +x ./install-stations
     ./install-stations
@@ -120,7 +120,7 @@ install_stations() {
   else
     echo -e "  ${RED}Error: install-stations script not found!${NC}"
   fi
-  
+
   echo ""
   read -p "Press Enter to continue..."
 }
@@ -131,23 +131,23 @@ check_dependencies() {
   echo -e "$BANNER"
   echo -e "  ${YELLOW}Checking dependencies...${NC}"
   echo ""
-  
+
   # Check for curl
-  if command -v curl &> /dev/null; then
+  if command -v curl &>/dev/null; then
     echo -e "  ${GREEN}✓ curl is installed${NC}"
   else
     echo -e "  ${RED}✗ curl is NOT installed${NC}"
     echo -e "  ${YELLOW}  Install with: sudo apt install curl${NC}"
   fi
-  
+
   # Check for mpv
-  if command -v mpv &> /dev/null; then
+  if command -v mpv &>/dev/null; then
     echo -e "  ${GREEN}✓ mpv is installed${NC}"
   else
     echo -e "  ${RED}✗ mpv is NOT installed${NC}"
     echo -e "  ${YELLOW}  Install with: sudo apt install mpv${NC}"
   fi
-  
+
   echo ""
   read -p "Press Enter to continue..."
 }
@@ -160,10 +160,10 @@ check_internet_connection() {
   echo ""
   echo -e "  ${CYAN}Pinging Google DNS (8.8.8.8)...${NC}"
   echo ""
-  
+
   # Ping Google DNS with 4 packets, show output
   ping -c 4 8.8.8.8
-  
+
   # Check the return code
   if [ $? -eq 0 ]; then
     echo ""
@@ -172,7 +172,7 @@ check_internet_connection() {
     echo ""
     echo -e "  ${RED}✗ Internet Connection Failed${NC}"
   fi
-  
+
   echo ""
   read -p "Press Enter to continue..."
 }
@@ -182,16 +182,16 @@ read_key() {
   local key
   IFS= read -rsn1 key
   case $key in
-    $'\x1b')  # ESC sequence
-      IFS= read -rsn2 key
-      case $key in
-        '[A') echo "UP" ;;
-        '[B') echo "DOWN" ;;
-        *) echo "UNKNOWN" ;;
-      esac
-      ;;
-    '') echo "ENTER" ;;
+  $'\x1b') # ESC sequence
+    IFS= read -rsn2 key
+    case $key in
+    '[A') echo "UP" ;;
+    '[B') echo "DOWN" ;;
     *) echo "UNKNOWN" ;;
+    esac
+    ;;
+  '') echo "ENTER" ;;
+  *) echo "UNKNOWN" ;;
   esac
 }
 
@@ -200,30 +200,30 @@ navigate_stations_menu() {
   while true; do
     display_stations_menu
     key=$(read_key)
-    
+
     case $key in
-      "UP")
-        if [ $stations_current_selection -gt 0 ]; then
-          ((stations_current_selection--))
-        else
-          stations_current_selection=$((${#stations_menu_options[@]} - 1))
-        fi
-        ;;
-      "DOWN")
-        if [ $stations_current_selection -lt $((${#stations_menu_options[@]} - 1)) ]; then
-          ((stations_current_selection++))
-        else
-          stations_current_selection=0
-        fi
-        ;;
-      "ENTER")
-        selected_option="${stations_menu_options[$stations_current_selection]}"
-        if [ "$selected_option" = "Back" ]; then
-          return 0
-        else
-          play_radio_stream "$selected_option"
-        fi
-        ;;
+    "UP")
+      if [ $stations_current_selection -gt 0 ]; then
+        ((stations_current_selection--))
+      else
+        stations_current_selection=$((${#stations_menu_options[@]} - 1))
+      fi
+      ;;
+    "DOWN")
+      if [ $stations_current_selection -lt $((${#stations_menu_options[@]} - 1)) ]; then
+        ((stations_current_selection++))
+      else
+        stations_current_selection=0
+      fi
+      ;;
+    "ENTER")
+      selected_option="${stations_menu_options[$stations_current_selection]}"
+      if [ "$selected_option" = "Back" ]; then
+        return 0
+      else
+        play_radio_stream "$selected_option"
+      fi
+      ;;
     esac
   done
 }
@@ -233,34 +233,34 @@ navigate_settings_menu() {
   while true; do
     display_settings_menu
     key=$(read_key)
-    
+
     case $key in
-      "UP")
-        if [ $settings_current_selection -gt 0 ]; then
-          ((settings_current_selection--))
-        else
-          settings_current_selection=$((${#settings_menu_options[@]} - 1))
-        fi
-        ;;
-      "DOWN")
-        if [ $settings_current_selection -lt $((${#settings_menu_options[@]} - 1)) ]; then
-          ((settings_current_selection++))
-        else
-          settings_current_selection=0
-        fi
-        ;;
-      "ENTER")
-        selected_option="${settings_menu_options[$settings_current_selection]}"
-        if [ "$selected_option" = "Back" ]; then
-          return 0
-        elif [ "$selected_option" = "Install Stations" ]; then
-          install_stations
-        elif [ "$selected_option" = "Check Dependencies" ]; then
-          check_dependencies
-        elif [ "$selected_option" = "Check Internet Connection" ]; then
-          check_internet_connection
-        fi
-        ;;
+    "UP")
+      if [ $settings_current_selection -gt 0 ]; then
+        ((settings_current_selection--))
+      else
+        settings_current_selection=$((${#settings_menu_options[@]} - 1))
+      fi
+      ;;
+    "DOWN")
+      if [ $settings_current_selection -lt $((${#settings_menu_options[@]} - 1)) ]; then
+        ((settings_current_selection++))
+      else
+        settings_current_selection=0
+      fi
+      ;;
+    "ENTER")
+      selected_option="${settings_menu_options[$settings_current_selection]}"
+      if [ "$selected_option" = "Back" ]; then
+        return 0
+      elif [ "$selected_option" = "Install Stations" ]; then
+        install_stations
+      elif [ "$selected_option" = "Check Dependencies" ]; then
+        check_dependencies
+      elif [ "$selected_option" = "Check Internet Connection" ]; then
+        check_internet_connection
+      fi
+      ;;
     esac
   done
 }
@@ -270,35 +270,35 @@ navigate_main_menu() {
   while true; do
     display_main_menu
     key=$(read_key)
-    
+
     case $key in
-      "UP")
-        if [ $main_current_selection -gt 0 ]; then
-          ((main_current_selection--))
-        else
-          main_current_selection=$((${#main_menu_options[@]} - 1))
-        fi
-        ;;
-      "DOWN")
-        if [ $main_current_selection -lt $((${#main_menu_options[@]} - 1)) ]; then
-          ((main_current_selection++))
-        else
-          main_current_selection=0
-        fi
-        ;;
-      "ENTER")
-        selected_option="${main_menu_options[$main_current_selection]}"
-        if [ "$selected_option" = "Quit" ]; then
-          echo ""
-          echo -e "  ${BLUE}Goodbye!${NC}"
-          echo ""
-          exit 0
-        elif [ "$selected_option" = "Play" ]; then
-          navigate_stations_menu
-        elif [ "$selected_option" = "Settings" ]; then
-          navigate_settings_menu
-        fi
-        ;;
+    "UP")
+      if [ $main_current_selection -gt 0 ]; then
+        ((main_current_selection--))
+      else
+        main_current_selection=$((${#main_menu_options[@]} - 1))
+      fi
+      ;;
+    "DOWN")
+      if [ $main_current_selection -lt $((${#main_menu_options[@]} - 1)) ]; then
+        ((main_current_selection++))
+      else
+        main_current_selection=0
+      fi
+      ;;
+    "ENTER")
+      selected_option="${main_menu_options[$main_current_selection]}"
+      if [ "$selected_option" = "Quit" ]; then
+        echo ""
+        echo -e "  ${BLUE}Goodbye!${NC}"
+        echo ""
+        exit 0
+      elif [ "$selected_option" = "Play" ]; then
+        navigate_stations_menu
+      elif [ "$selected_option" = "Settings" ]; then
+        navigate_settings_menu
+      fi
+      ;;
     esac
   done
 }
