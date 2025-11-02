@@ -102,7 +102,7 @@ play_radio_stream() {
   echo -e "$BANNER"
   echo "Playing $1" radio stream...
   echo -e "${BLUE}Pro Tip: Press q to go back to stations list${NC}"
-  mpv "${stations_dir}/${radio_menu[$1]}"
+  mpv --stream-record=cache/last_stream.mkv "${stations_dir}/${radio_menu[$1]}"
 }
 
 # Function to install stations
