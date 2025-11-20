@@ -28,13 +28,14 @@ radio_menu["Ambient"]="ambient.ogg.m3u"
 radio_menu["Trance"]="trance.ogg.m3u"
 radio_menu["Tronic"]="tronic.ogg.m3u"
 radio_menu["Dubstep"]="dubstepfm.ogg.m3u"
+radio_menu["Manele"]="radiofunky.ogg.m3u"
 
 # Main menu options
 main_menu_options=("Play" "Settings" "Quit")
 main_current_selection=0
 
 # Play submenu options
-stations_menu_options=("Trance" "Ambient" "Tronic" "Dubstep" "Back")
+stations_menu_options=("Trance" "Ambient" "Tronic" "Dubstep" "Manele" "Back")
 stations_current_selection=0
 
 # Settings submenu options

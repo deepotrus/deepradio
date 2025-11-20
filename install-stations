@@ -20,3 +20,6 @@ printf "\nDownloading station Dubstep FM...\n"
 curl -X GET "www.dubstep.fm/listen.m3u" \
   -H "$user_agent" \
   -o "${stations_dir}/dubstepfm.ogg.m3u"
+
+printf "\nDownloading station Radio Funky...\n"
+echo 'http://live.radiofunky.ro:8888' > "${stations_dir}/radiofunky.ogg.m3u"
