@@ -8,18 +8,13 @@ hbr1_stations=("trance" "ambient" "tronic")
 
 for station in ${hbr1_stations[@]}; do
   printf "\nDownloading station $station...\n"
-
-  curl -X GET "http://www.hbr1.com/playlist/${station}.ogg.m3u" \
-    -H "$user_agent" \
-    -H "$referer" \
-    -o "${stations_dir}/${station}.ogg.m3u"
+  echo "http://www.hbr1.com/playlist/${station}.ogg.m3u" > "${stations_dir}/${station}.ogg.m3u"
   sleep 0.5 # seconds
 done
 
+# This radio is unavailable also in all other clients in web
 printf "\nDownloading station Dubstep FM...\n"
-curl -X GET "www.dubstep.fm/listen.m3u" \
-  -H "$user_agent" \
-  -o "${stations_dir}/dubstepfm.ogg.m3u"
+echo http://dubstep.fm/listen.m3u > "${stations_dir}/dubstepfm.ogg.m3u"
 
 printf "\nDownloading station Radio Funky...\n"
 echo 'http://live.radiofunky.ro:8888' > "${stations_dir}/radiofunky.ogg.m3u"
