@@ -1,26 +1,28 @@
 #!/bin/bash
 
-# Color definitions
-RED='\033[0;31m'
-GREEN='\033[0;32m'
-YELLOW='\033[1;33m'
-BLUE='\033[0;34m'
-CYAN='\033[0;36m'
-BOLD='\033[1m'
-NC='\033[0m' # No Color
+shopt -s extglob
+
+# Color definitions (plain ANSI colors, so pywal themes apply)
+RED=$'\e[0;31m'
+GREEN=$'\e[0;32m'
+YELLOW=$'\e[1;33m'
+BLUE=$'\e[0;34m'
+CYAN=$'\e[0;36m'
+BOLD=$'\e[1m'
+NC=$'\e[0m' # No Color
 
 # ASCII art banner
-BANNER="
-  ${RED}····················································${NC}
-  ${RED}:  ____                  ____           _ _        :${NC}
-  ${RED}: |  _ \  ___  ___ _ __ |  _ \ __ _  __| (_) ___   :${NC}
-  ${RED}: | | | |/ _ \/ _ \  _ \| |_) / _  |/ _  | |/ _ \  :${NC}
-  ${RED}: | |_| |  __/  __/ |_) |  _ < (_| | (_| | | (_) | :${NC}
-  ${RED}: |____/ \___|\___| .__/|_| \_\__,_|\__,_|_|\___/  :${NC}
-  ${RED}:                 |_|                              :${NC}
-  ${RED}: ${YELLOW}                          ~ by deepotrus${NC}         ${RED}:${NC}
-  ${RED}····················································${NC}
-"
+BANNER=(
+  "${RED}····················································"
+  "${RED}:  ____                  ____           _ _        :"
+  "${RED}: |  _ \  ___  ___ _ __ |  _ \ __ _  __| (_) ___   :"
+  "${RED}: | | | |/ _ \/ _ \  _ \| |_) / _  |/ _  | |/ _ \  :"
+  "${RED}: | |_| |  __/  __/ |_) |  _ < (_| | (_| | | (_) | :"
+  "${RED}: |____/ \___|\___| .__/|_| \_\__,_|\__,_|_|\___/  :"
+  "${RED}:                 |_|                              :"
+  "${RED}: ${YELLOW}                          ~ by deepotrus${NC}         ${RED}:"
+  "${RED}····················································"
+)
 
 # Define the radio menu options and corresponding commands
 declare -A radio_menu
@@ -44,225 +46,535 @@ settings_menu_options=("Install Stations" "Check Dependencies" "Check Internet C
 settings_current_selection=0
 
 stations_dir="stations"
+cache_dir="cache"
 
-# Function to display the main menu
-display_main_menu() {
-  clear
-  echo -e "$BANNER"
-  echo -e "  ${RED}~~~~ ${NC}${YELLOW}Radio Menu${NC}${RED} ~~~~${NC}"
+NAV_HINT="Use ↑↓ arrows to navigate, Enter to select"
+PLAY_HINT="←→ seek 5s, ↑↓ seek 1 min, 9/0 volume, m mute, space pause, q back"
+REC_HINT="r record, s stop record, esc interrupt record"
 
-  for i in "${!main_menu_options[@]}"; do
-    if [ $i -eq $main_current_selection ]; then
-      echo -e "  ${BOLD}${CYAN}▶ ${main_menu_options[$i]}${NC}"
-    else
-      echo -e "  ${GREEN}  ${main_menu_options[$i]}${NC}"
-    fi
-  done
+# Temporary files: mpv command pipe
+tmp_dir=$(mktemp -d)
+ipc_fifo="${tmp_dir}/mpv-ipc"
+mkfifo "$ipc_fifo"
+ev_fifo="${tmp_dir}/events" # mpv key bindings write recording events here
+mkfifo "$ev_fifo"
 
-  echo -e "  ${RED}~~~~~~~~~~~~~~~~~~~~${NC}"
-  echo -e "  ${YELLOW}Use ↑↓ arrows to navigate, Enter to select${NC}"
+# ---------------------------------------------------------------------------
+# Terminal handling
+# ---------------------------------------------------------------------------
+
+saved_stty=$(stty -g)
+
+cleanup() {
+  [ -n "$watcher_pid" ] && kill "$watcher_pid" 2>/dev/null
+  rm -rf "$tmp_dir"
+  stty "$saved_stty"
+  printf '%s\e[?25h' "$NC"
+  tput rmcup
+  if [ -n "$say_goodbye" ]; then
+    printf '\n  %sGoodbye!%s\n\n' "$BLUE" "$NC"
+  fi
 }
 
-# Function to display the stations submenu
-display_stations_menu() {
-  clear
-  echo -e "$BANNER"
-  echo -e "  ${RED}~~~~ ${NC}${YELLOW}Stations List${NC}${RED} ~~~~${NC}"
+trap cleanup EXIT
+trap 'exit 130' INT TERM
+trap 'resized=1' WINCH
 
-  for i in "${!stations_menu_options[@]}"; do
-    if [ $i -eq $stations_current_selection ]; then
-      echo -e "  ${BOLD}${CYAN}▶ ${stations_menu_options[$i]}${NC}"
-    else
-      echo -e "  ${GREEN}  ${stations_menu_options[$i]}${NC}"
-    fi
-  done
+tput smcup       # Alternate screen, the shell scrollback stays clean
+printf '\e[?25l' # Hide cursor
+stty -echo
 
-  echo -e "  ${RED}~~~~~~~~~~~~~~~~~~~~~~~${NC}"
-  echo -e "  ${YELLOW}Use ↑↓ arrows to navigate, Enter to select${NC}"
+# ---------------------------------------------------------------------------
+# Drawing helpers: lines are collected in FRAME and drawn centered by render
+# ---------------------------------------------------------------------------
+
+FRAME=()
+
+frame_add() {
+  FRAME+=("$1")
 }
 
-# Function to display the settings submenu
-display_settings_menu() {
-  clear
-  echo -e "$BANNER"
-  echo -e "  ${RED}~~~~ ${NC}${YELLOW}Radio Settings${NC}${RED} ~~~~${NC}"
+# Visible width of a string (color codes stripped)
+vis_width() {
+  local plain=${1//$'\e'\[*([0-9;])m/}
+  echo ${#plain}
+}
 
-  for i in "${!settings_menu_options[@]}"; do
-    if [ $i -eq $settings_current_selection ]; then
-      echo -e "  ${BOLD}${CYAN}▶ ${settings_menu_options[$i]}${NC}"
-    else
-      echo -e "  ${GREEN}  ${settings_menu_options[$i]}${NC}"
+# Repeat a string n times
+repeat() {
+  local out="" k
+  for ((k = 0; k < $2; k++)); do
+    out+=$1
+  done
+  printf '%s' "$out"
+}
+
+# Draw FRAME centered on screen, overwriting the previous frame in place (no flicker)
+render() {
+  local cols rows line w out i
+  cols=$(tput cols)
+  rows=$(tput lines)
+
+  FRAME_TOP=$(((rows - ${#FRAME[@]}) / 2))
+  ((FRAME_TOP < 0)) && FRAME_TOP=0
+
+  out=$'\e[H'
+  for ((i = 0; i < FRAME_TOP; i++)); do
+    out+=$'\e[K\n'
+  done
+  for line in "${FRAME[@]}"; do
+    w=$(vis_width "$line")
+    out+="$(repeat ' ' $(((cols - w) / 2)))${line}${NC}"$'\e[K\n'
+  done
+  out+=$'\e[J'
+
+  printf '%s' "$out"
+  FRAME=()
+}
+
+# Add the banner, or a one-line logo when the terminal is too small for it
+draw_banner() {
+  local line
+  if (($(tput cols) < 56 || $(tput lines) < 22)); then
+    frame_add "${RED}DeepRadio ${YELLOW}~ by deepotrus"
+  else
+    for line in "${BANNER[@]}"; do
+      frame_add "$line"
+    done
+  fi
+  frame_add ""
+}
+
+# Add a block of lines that stays left-aligned while centered as a whole.
+# $1 is the minimum block width, so blocks of different screens can share the same left edge
+frame_block() {
+  local width=$1
+  local line w
+  shift
+  for line in "$@"; do
+    w=$(vis_width "$line")
+    ((w > width)) && width=$w
+  done
+  BLOCK_W=$width
+  for line in "$@"; do
+    w=$(vis_width "$line")
+    frame_add "${line}$(repeat ' ' $((width - w)))"
+  done
+}
+
+# Add a section in the menu style: ~~~~ title ~~~~, rows, closing line and hint.
+# Sections are at least as wide as the menu hint, so all of them line up with the menus
+frame_section() {
+  local title=$1 hint=$2
+  shift 2
+  local header="~~~~ ${title} ~~~~"
+  frame_block ${#NAV_HINT} \
+    "${RED}~~~~ ${YELLOW}${title}${RED} ~~~~${NC}" \
+    "$@" \
+    "${RED}$(repeat '~' ${#header})${NC}" \
+    "${YELLOW}${hint}${NC}"
+}
+
+# ---------------------------------------------------------------------------
+# Input
+# ---------------------------------------------------------------------------
+
+# Read one key into KEY: UP, DOWN, ENTER, BACK, QUIT, RESIZE or OTHER
+read_key() {
+  local k rest status
+  while true; do
+    IFS= read -rsn1 -t 0.3 k
+    status=$?
+    ((status == 0)) && break
+    if ((status <= 128)); then # EOF on stdin
+      KEY="QUIT"
+      return
+    fi
+    if [ -n "$resized" ]; then
+      resized=""
+      KEY="RESIZE"
+      return
     fi
   done
 
-  echo -e "  ${RED}~~~~~~~~~~~~~~~~~~~~~~~~${NC}"
-  echo -e "  ${YELLOW}Use ↑↓ arrows to navigate, Enter to select${NC}"
+  case $k in
+  $'\e') # ESC sequence, or a lone Esc
+    IFS= read -rsn2 -t 0.05 rest
+    case $rest in
+    '[A' | 'OA') KEY="UP" ;;
+    '[B' | 'OB') KEY="DOWN" ;;
+    '') KEY="BACK" ;;
+    *) KEY="OTHER" ;;
+    esac
+    ;;
+  '') KEY="ENTER" ;;
+  k | K) KEY="UP" ;;
+  j | J) KEY="DOWN" ;;
+  q | Q) KEY="BACK" ;;
+  *) KEY="OTHER" ;;
+  esac
+}
+
+# Show a result section until a key is pressed
+show_result() {
+  local title=$1
+  shift
+  while true; do
+    draw_banner
+    frame_section "$title" "Press any key to continue..." "$@"
+    render
+    read_key
+    [ "$KEY" != "RESIZE" ] && return
+  done
+}
+
+# Run a command in the background with a spinner; sets SPIN_OUT and SPIN_STATUS
+run_with_spinner() {
+  local title=$1 msg=$2
+  shift 2
+  local frames=(⠋ ⠙ ⠹ ⠸ ⠼ ⠴ ⠦ ⠧ ⠇ ⠏)
+  local i=0 tmp pid
+
+  tmp=$(mktemp)
+  "$@" >"$tmp" 2>&1 &
+  pid=$!
+  while kill -0 $pid 2>/dev/null; do
+    draw_banner
+    frame_section "$title" "Please wait..." "${CYAN}${frames[i % ${#frames[@]}]} ${msg}${NC}"
+    render
+    ((i++))
+    sleep 0.1
+  done
+  wait $pid
+  SPIN_STATUS=$?
+  SPIN_OUT=$(<"$tmp")
+  rm -f "$tmp"
+}
+
+# ---------------------------------------------------------------------------
+# Menus
+# ---------------------------------------------------------------------------
+
+# Run a menu until an item is chosen; sets CHOICE to the item, or "Back" on q/Esc
+run_menu() {
+  local title=$1
+  local -n rm_items=$2
+  local -n rm_sel=$3
+  local count=${#rm_items[@]}
+  local rows i
+
+  while true; do
+    rows=()
+    for i in "${!rm_items[@]}"; do
+      if [ $i -eq $rm_sel ]; then
+        rows+=("${BOLD}${CYAN}▶ ${rm_items[$i]}${NC}")
+      else
+        rows+=("${GREEN}  ${rm_items[$i]}${NC}")
+      fi
+    done
+
+    draw_banner
+    frame_section "$title" "$NAV_HINT" "${rows[@]}"
+    render
+    read_key
+
+    case $KEY in
+    "UP") rm_sel=$(((rm_sel - 1 + count) % count)) ;;
+    "DOWN") rm_sel=$(((rm_sel + 1) % count)) ;;
+    "ENTER")
+      CHOICE=${rm_items[rm_sel]}
+      return
+      ;;
+    "BACK" | "QUIT")
+      CHOICE="Back"
+      return
+      ;;
+    esac
+  done
+}
+
+STATUS_LINES=5
+
+# mpv status block, every line indented by $1 spaces. mpv fills in the ${...} properties,
+# user-data/rec (recording file and size) is set by the watcher
+status_msg() {
+  local indent station=$2
+  indent=$(repeat ' ' "$1")
+  printf '%s' \
+    "${indent}${RED}LIVE${NC} - ${BOLD}${CYAN}${station}${NC} - "'${media-title}'$'\n' \
+    "${indent}${CYAN}Genre ${NC}  "'${metadata/by-key/icy-genre:-}'$'\n' \
+    "${indent}${CYAN}Stream${NC}  "'${audio-codec-name:-}, ${audio-bitrate:-}, ${audio-params/samplerate:-} Hz'$'\n' \
+    "${indent}${CYAN}Time  ${NC}  "'${playback-time}   vol ${volume}%${?mute==yes: (muted)}${?pause==yes: (paused)}'$'\n' \
+    "${indent}${CYAN}Rec   ${NC}  "'${user-data/rec:-}'
+}
+
+# Format a size in bytes as B, KB or MB
+human_size() {
+  local bytes=$1
+  if ((bytes >= 1048576)); then
+    echo "$((bytes / 1048576)).$((bytes % 1048576 * 10 / 1048576)) MB"
+  elif ((bytes >= 1024)); then
+    echo "$((bytes / 1024)) KB"
+  else
+    echo "${bytes} B"
+  fi
+}
+
+# Draw the playback screen and put the cursor on line $1 (default 0) of the status block.
+# Sets PLAY_LEFT
+draw_play_screen() {
+  local cursor_line=${1:-0}
+  local cols status_idx i
+  local block=()
+  cols=$(tput cols)
+
+  draw_banner
+  status_idx=${#FRAME[@]}
+  for ((i = 0; i < STATUS_LINES; i++)); do
+    block+=("") # mpv draws its status block here
+  done
+  frame_block 0 "${block[@]}" "" "${YELLOW}${PLAY_HINT}${NC}" "${YELLOW}${REC_HINT}${NC}"
+  PLAY_LEFT=$(((cols - BLOCK_W) / 2))
+  ((PLAY_LEFT < 0)) && PLAY_LEFT=0
+
+  render
+  printf '\e[%d;1H' $((FRAME_TOP + status_idx + 1 + cursor_line))
+}
+
+# Playback position in seconds (e.g. 30.097992) as integer milliseconds
+to_ms() {
+  local int=${1%.*} frac=0
+  [[ $1 == *.* ]] && frac=${1#*.}
+  frac="${frac}000"
+  echo $((10#$int * 1000 + 10#${frac:0:3}))
+}
+
+# Current time in integer milliseconds
+now_ms() {
+  to_ms "${EPOCHREALTIME/,/.}"
+}
+
+# Show a note after "off" on the recording line for 5 seconds
+set_rec_note() {
+  rec_note=$1
+  rec_note_until=$(($(now_ms) + 5000))
+}
+
+# Start a recording at playback position $1, named after the station and the current date (key r).
+# After seeking back the already heard part is recorded too: mpv dumps its cache from
+# ab-loop-a on and keeps appending new data (ab-loop-b no)
+recording_start() {
+  local pos=$1
+  [[ $pos =~ ^[0-9]+(\.[0-9]+)?$ ]] || return
+  rec_start_ms=$(to_ms "$pos")
+  rec_file="${cache_dir}/${station,,}_$(date +%Y-%m-%d_%H-%M-%S).mkv"
+  rec_note=""
+  printf 'no-osd set ab-loop-a %s\n' "$pos" >&$ipc_fd
+  printf 'no-osd set ab-loop-b no\n' >&$ipc_fd
+  printf 'no-osd async ab-loop-dump-cache "%s"\n' "$rec_file" >&$ipc_fd
+  printf 'no-osd set ab-loop-a no\n' >&$ipc_fd
+}
+
+# Stop the recording at playback position $1 (key s). Stopping before the point where the
+# recording started interrupts it instead
+recording_stop() {
+  local pos=$1
+  [ -z "$rec_file" ] && return
+  if [[ $pos =~ ^[0-9]+(\.[0-9]+)?$ ]] && (($(to_ms "$pos") < rec_start_ms)); then
+    recording_interrupt "stopped before start point"
+    return
+  fi
+  printf 'no-osd async dump-cache 0 no ""\n' >&$ipc_fd
+  set_rec_note "saved ${rec_file}"
+  rec_file=""
+}
+
+# Interrupt the recording: stop it and delete the file (key Esc, or s before the recording start).
+# $1 is the reason shown to the user
+recording_interrupt() {
+  local reason=$1
+  [ -z "$rec_file" ] && return
+  printf 'no-osd async dump-cache 0 no ""\n' >&$ipc_fd
+  rm -f "$rec_file"
+  set_rec_note "${YELLOW}interrupted (${reason}), file deleted${NC}"
+  rec_file=""
+}
+
+# Background process during playback: handles the recording keys (mpv writes "start <pos>",
+# "stop <pos>" or "interrupt" to the events pipe), updates the recording line and, on terminal
+# resize, redraws the screen and re-indents mpv's status block. It talks to mpv through the
+# mpv command pipe
+play_watcher() {
+  local station=$1 ipc_fd=$2
+  local rec_file="" rec_start_ms=0 rec_note="" rec_note_until=0 resized="" tick=0 msg rec size event pos ev_fd
+
+  trap 'resized=1' WINCH
+  trap 'exit 0' TERM
+  exec {ev_fd}<>"$ev_fifo"
+
+  while true; do
+    if [ -n "$resized" ]; then
+      resized=""
+      # mpv redraws its status block upwards from the last line it printed
+      draw_play_screen $((STATUS_LINES - 1))
+      msg=$(status_msg "$PLAY_LEFT" "$station")
+      printf 'no-osd raw set term-status-msg "%s"\n' "${msg//$'\n'/\\n}" >&$ipc_fd
+    fi
+    if [ -n "$rec_note" ] && (($(now_ms) >= rec_note_until)); then
+      rec_note=""
+      tick=0
+    fi
+    if ((tick % 4 == 0)); then
+      if [ -n "$rec_file" ]; then
+        size=0
+        [ -f "$rec_file" ] && size=$(stat -c %s "$rec_file")
+        rec="${RED}● ${rec_file}  $(human_size "$size")${NC}"
+      elif [ -n "$rec_note" ]; then
+        rec="off - ${rec_note}"
+      else
+        rec="off"
+      fi
+      printf 'no-osd raw set user-data/rec "%s"\n' "$rec" >&$ipc_fd
+    fi
+    ((tick++))
+
+    if IFS=' ' read -r -t 0.25 -u "$ev_fd" event pos; then
+      case $event in
+      "start") recording_start "$pos" ;;
+      "stop") recording_stop "$pos" ;;
+      "interrupt") recording_interrupt "esc" ;;
+      esac
+      tick=0
+    fi
+  done
 }
 
 play_radio_stream() {
-  clear
-  echo -e "$BANNER"
-  echo "Playing $1" radio stream...
-  echo -e "${BLUE}Pro Tip: Press q to go back to stations list${NC}"
-  mpv --stream-record=cache/last_stream.mkv "${stations_dir}/${radio_menu[$1]}"
+  local station=$1
+  local ipc_fd status
+
+  draw_play_screen
+
+  # mpv reads commands from this pipe; the watcher uses it for recordings and resizes
+  exec {ipc_fd}<>"$ipc_fifo"
+  play_watcher "$station" "$ipc_fd" &
+  watcher_pid=$!
+
+  mpv --no-video \
+    --msg-level=all=no,statusline=status \
+    --osd-level=0 \
+    --term-status-msg="$(status_msg "$PLAY_LEFT" "$station")" \
+    --input-ipc-client="fd://${ipc_fd}" \
+    --input-commands-append="raw keybind r \"expand-properties run sh -c 'echo start \${=time-pos} >> ${ev_fifo}'\"" \
+    --input-commands-append="raw keybind s \"expand-properties run sh -c 'echo stop \${=time-pos} >> ${ev_fifo}'\"" \
+    --input-commands-append="raw keybind ESC \"run sh -c 'echo interrupt >> ${ev_fifo}'\"" \
+    "${stations_dir}/${radio_menu[$station]}"
+  status=$?
+
+  kill "$watcher_pid" 2>/dev/null
+  wait "$watcher_pid" 2>/dev/null
+  watcher_pid=""
+  exec {ipc_fd}>&-
+  printf '\e[?25l'
+
+  if ((status != 0)); then
+    show_result "Playback Failed" \
+      "${RED}✗ Could not play ${station} (mpv exit code ${status})${NC}" \
+      "${YELLOW}  The station may be offline${NC}"
+  fi
 }
 
 # Function to install stations
 install_stations() {
-  clear
-  echo -e "$BANNER"
-  echo -e "  ${YELLOW}Installing radio stations...${NC}"
-  echo ""
+  local rows=() line
 
-  if [ -f "./install-stations" ]; then
-    chmod +x ./install-stations
-    ./install-stations
-    echo ""
-    echo -e "  ${GREEN}Station installation completed!${NC}"
-  else
-    echo -e "  ${RED}Error: install-stations script not found!${NC}"
+  if [ ! -f "./install-stations" ]; then
+    show_result "Installing Stations" "${RED}Error: install-stations script not found!${NC}"
+    return
   fi
 
-  echo ""
-  read -p "Press Enter to continue..."
+  chmod +x ./install-stations
+  run_with_spinner "Installing Stations" "Installing radio stations..." ./install-stations
+
+  while IFS= read -r line; do
+    if [[ $line =~ ^Downloading\ station\ (.*)\.\.\.$ ]]; then
+      rows+=("${GREEN}✓ ${BASH_REMATCH[1]}${NC}")
+    fi
+  done <<<"$SPIN_OUT"
+  if ((SPIN_STATUS == 0)); then
+    rows+=("${GREEN}Station installation completed!${NC}")
+  else
+    rows+=("${RED}✗ install-stations failed (exit code ${SPIN_STATUS})${NC}")
+  fi
+
+  show_result "Installing Stations" "${rows[@]}"
+}
+
+# Add a dependency status line (and install hint when missing) to the rows array
+check_dependency() {
+  local -n cd_rows=$1
+  local tool=$2 hint=$3
+
+  if command -v "$tool" &>/dev/null; then
+    cd_rows+=("${GREEN}✓ ${tool} is installed${NC}")
+  else
+    cd_rows+=("${RED}✗ ${tool} is NOT installed${NC}")
+    cd_rows+=("${YELLOW}  ${hint}${NC}")
+  fi
 }
 
 # Function to check dependencies
 check_dependencies() {
-  clear
-  echo -e "$BANNER"
-  echo -e "  ${YELLOW}Checking dependencies...${NC}"
-  echo ""
+  local rows=()
 
-  # Check for curl
-  if command -v curl &>/dev/null; then
-    echo -e "  ${GREEN}✓ curl is installed${NC}"
-  else
-    echo -e "  ${RED}✗ curl is NOT installed${NC}"
-    echo -e "  ${YELLOW}  Install with: sudo apt install curl${NC}"
-  fi
+  check_dependency rows curl "Install with: sudo apt install curl"
+  check_dependency rows mpv "Install with: sudo apt install mpv"
 
-  # Check for mpv
-  if command -v mpv &>/dev/null; then
-    echo -e "  ${GREEN}✓ mpv is installed${NC}"
-  else
-    echo -e "  ${RED}✗ mpv is NOT installed${NC}"
-    echo -e "  ${YELLOW}  Install with: sudo apt install mpv${NC}"
-  fi
-
-  echo ""
-  read -p "Press Enter to continue..."
+  show_result "Dependencies" "${rows[@]}"
 }
 
 # Function to check internet connection
 check_internet_connection() {
-  clear
-  echo -e "$BANNER"
-  echo -e "  ${YELLOW}Checking internet connection...${NC}"
-  echo ""
-  echo -e "  ${CYAN}Pinging Google DNS (8.8.8.8)...${NC}"
-  echo ""
+  local rows=() loss="" avg=""
+  local re_loss='([0-9.]+)% packet loss'
+  local re_avg='= [0-9.]+/([0-9.]+)/'
 
-  # Ping Google DNS with 4 packets, show output
-  ping -c 4 8.8.8.8
+  run_with_spinner "Internet Connection" "Pinging Google DNS (8.8.8.8)..." ping -c 4 -i 0.25 -W 2 8.8.8.8
 
-  # Check the return code
-  if [ $? -eq 0 ]; then
-    echo ""
-    echo -e "  ${GREEN}✓ Internet Connection Stable${NC}"
+  [[ $SPIN_OUT =~ $re_loss ]] && loss=${BASH_REMATCH[1]}
+  [[ $SPIN_OUT =~ $re_avg ]] && avg=${BASH_REMATCH[1]}
+
+  if ((SPIN_STATUS == 0)); then
+    rows+=("${GREEN}✓ Internet Connection Stable${NC}")
+    rows+=("${CYAN}  avg ${avg} ms, ${loss}% packet loss${NC}")
   else
-    echo ""
-    echo -e "  ${RED}✗ Internet Connection Failed${NC}"
+    rows+=("${RED}✗ Internet Connection Failed${NC}")
+    [ -n "$loss" ] && rows+=("${CYAN}  ${loss}% packet loss${NC}")
   fi
 
-  echo ""
-  read -p "Press Enter to continue..."
-}
-
-# Function to read a single keypress
-read_key() {
-  local key
-  IFS= read -rsn1 key
-  case $key in
-  $'\x1b') # ESC sequence
-    IFS= read -rsn2 key
-    case $key in
-    '[A') echo "UP" ;;
-    '[B') echo "DOWN" ;;
-    *) echo "UNKNOWN" ;;
-    esac
-    ;;
-  '') echo "ENTER" ;;
-  *) echo "UNKNOWN" ;;
-  esac
+  show_result "Internet Connection" "${rows[@]}"
 }
 
 # Function to handle stations submenu navigation
 navigate_stations_menu() {
   while true; do
-    display_stations_menu
-    key=$(read_key)
-
-    case $key in
-    "UP")
-      if [ $stations_current_selection -gt 0 ]; then
-        ((stations_current_selection--))
-      else
-        stations_current_selection=$((${#stations_menu_options[@]} - 1))
-      fi
-      ;;
-    "DOWN")
-      if [ $stations_current_selection -lt $((${#stations_menu_options[@]} - 1)) ]; then
-        ((stations_current_selection++))
-      else
-        stations_current_selection=0
-      fi
-      ;;
-    "ENTER")
-      selected_option="${stations_menu_options[$stations_current_selection]}"
-      if [ "$selected_option" = "Back" ]; then
-        return 0
-      else
-        play_radio_stream "$selected_option"
-      fi
-      ;;
-    esac
+    run_menu "Stations List" stations_menu_options stations_current_selection
+    if [ "$CHOICE" = "Back" ]; then
+      return 0
+    fi
+    play_radio_stream "$CHOICE"
   done
 }
 
 # Function to handle settings submenu navigation
 navigate_settings_menu() {
   while true; do
-    display_settings_menu
-    key=$(read_key)
-
-    case $key in
-    "UP")
-      if [ $settings_current_selection -gt 0 ]; then
-        ((settings_current_selection--))
-      else
-        settings_current_selection=$((${#settings_menu_options[@]} - 1))
-      fi
-      ;;
-    "DOWN")
-      if [ $settings_current_selection -lt $((${#settings_menu_options[@]} - 1)) ]; then
-        ((settings_current_selection++))
-      else
-        settings_current_selection=0
-      fi
-      ;;
-    "ENTER")
-      selected_option="${settings_menu_options[$settings_current_selection]}"
-      if [ "$selected_option" = "Back" ]; then
-        return 0
-      elif [ "$selected_option" = "Install Stations" ]; then
-        install_stations
-      elif [ "$selected_option" = "Check Dependencies" ]; then
-        check_dependencies
-      elif [ "$selected_option" = "Check Internet Connection" ]; then
-        check_internet_connection
-      fi
-      ;;
+    run_menu "Radio Settings" settings_menu_options settings_current_selection
+    case $CHOICE in
+    "Back") return 0 ;;
+    "Install Stations") install_stations ;;
+    "Check Dependencies") check_dependencies ;;
+    "Check Internet Connection") check_internet_connection ;;
     esac
   done
 }
@@ -270,36 +582,13 @@ navigate_settings_menu() {
 # Function to handle main menu navigation
 navigate_main_menu() {
   while true; do
-    display_main_menu
-    key=$(read_key)
-
-    case $key in
-    "UP")
-      if [ $main_current_selection -gt 0 ]; then
-        ((main_current_selection--))
-      else
-        main_current_selection=$((${#main_menu_options[@]} - 1))
-      fi
-      ;;
-    "DOWN")
-      if [ $main_current_selection -lt $((${#main_menu_options[@]} - 1)) ]; then
-        ((main_current_selection++))
-      else
-        main_current_selection=0
-      fi
-      ;;
-    "ENTER")
-      selected_option="${main_menu_options[$main_current_selection]}"
-      if [ "$selected_option" = "Quit" ]; then
-        echo ""
-        echo -e "  ${BLUE}Goodbye!${NC}"
-        echo ""
-        exit 0
-      elif [ "$selected_option" = "Play" ]; then
-        navigate_stations_menu
-      elif [ "$selected_option" = "Settings" ]; then
-        navigate_settings_menu
-      fi
+    run_menu "Radio Menu" main_menu_options main_current_selection
+    case $CHOICE in
+    "Play") navigate_stations_menu ;;
+    "Settings") navigate_settings_menu ;;
+    "Quit" | "Back")
+      say_goodbye=1
+      exit 0
       ;;
     esac
   done
