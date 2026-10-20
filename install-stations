@@ -18,3 +18,6 @@ echo http://dubstep.fm/listen.m3u > "${stations_dir}/dubstepfm.ogg.m3u"
 
 printf "\nDownloading station Radio Funky...\n"
 echo 'http://live.radiofunky.ro:8888' > "${stations_dir}/radiofunky.ogg.m3u"
+
+printf "\nDownloading station Riviera Radio...\n"
+echo 'https://media-ssl.musicradio.com/RivieraRadio' > "${stations_dir}/rivieraradio.ogg.m3u"
