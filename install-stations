@@ -4,13 +4,14 @@ user_agent="User-Agent: Mozilla/5.0 (X11; Linux x86_64; rv:128.0) Gecko/20100101
 referer="Referer: http://www.hbr1.com/cgi-bin/main.php?module=listen"
 stations_dir="stations"
 
-hbr1_stations=("trance" "ambient" "tronic")
+printf "\nDownloading station Trance...\n"
+echo "https://radio.hbr1.com/stream/trance.ogg"  > "${stations_dir}/trance.ogg.m3u"
 
-for station in ${hbr1_stations[@]}; do
-  printf "\nDownloading station $station...\n"
-  echo "http://www.hbr1.com/playlist/${station}.ogg.m3u" > "${stations_dir}/${station}.ogg.m3u"
-  sleep 0.5 # seconds
-done
+printf "\nDownloading station Ambient...\n"
+echo "https://radio.hbr1.com/stream/ambient.aac" > "${stations_dir}/ambient.ogg.m3u"
+
+printf "\nDownloading station Tronic...\n"
+echo "https://radio.hbr1.com/stream/tronic.ogg"  > "${stations_dir}/tronic.ogg.m3u"
 
 # This radio is unavailable also in all other clients in web
 printf "\nDownloading station Dubstep FM...\n"
